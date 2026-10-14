@@ -44,6 +44,19 @@ function ChatFormSkeleton() {
   )
 }
 
+// Sorot nama "Kompas" / "Kompas.id" dengan warna biru Kompas
+function highlightKompas(text: string) {
+  return text.split(/(Kompas(?:\.id)?)/g).map((part, i) =>
+    /^Kompas(\.id)?$/.test(part) ? (
+      <span key={i} className="text-kompas-blue">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  )
+}
+
 const ExampleQuestions = React.memo(function ExampleQuestions({ questions, isLoading, onSelect }: { 
   questions: string[], 
   isLoading: boolean, 
@@ -298,9 +311,9 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
       {titleData.keyword && (
         <p className="font-sans text-sm font-bold uppercase tracking-wide text-kompas-red">{titleData.keyword}</p>
       )}
-      <h1 className="font-serif text-2xl font-bold leading-tight">{titleData.title}</h1>
+      <h1 className="font-serif text-2xl font-bold leading-tight">{highlightKompas(titleData.title)}</h1>
       <p className="font-serif text-black/80 text-sm">
-        {titleData.subtitle}
+        {highlightKompas(titleData.subtitle)}
       </p>
     </header>
   )
