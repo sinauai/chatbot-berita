@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, Suspense, useRef } from "react"
+import React, { useState, useEffect, Suspense, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { useChat } from "ai/react"
 import { ArrowUpIcon, Loader2 } from "lucide-react"
@@ -11,10 +11,22 @@ import Link from "next/link"
 import ReactMarkdown from "react-markdown"
 import { useEmbedMode } from "@/hooks/use-embed-mode"
 import { trackArticleClick } from "@/lib/track-click"
+import { getParentOrigin } from "@/lib/embed-origins"
 
 type Source = {
   title: string
   url: string
+}
+
+type RetrievedSource = Source & { ref: number }
+
+// Ambil daftar artikel hasil retrieval dari message annotation yang dikirim /api/chat
+function getRetrievedSources(message: { annotations?: unknown[] }): RetrievedSource[] {
+  for (const annotation of message.annotations ?? []) {
+    const a = annotation as { type?: string; sources?: RetrievedSource[] }
+    if (a?.type === "sources" && Array.isArray(a.sources)) return a.sources
+  }
+  return []
 }
 
 // Komponen loading fallback
@@ -31,6 +43,42 @@ function ChatFormSkeleton() {
     </div>
   )
 }
+
+const ExampleQuestions = React.memo(function ExampleQuestions({ questions, isLoading, onSelect }: { 
+  questions: string[], 
+  isLoading: boolean, 
+  onSelect: (q: string) => void 
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2 mb-6">
+        {[1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 h-10 animate-pulse"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (questions.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2 mb-6">
+      {questions.map((q, idx) => (
+        <button
+          key={`${q}-${idx}`}
+          className="border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-900 rounded-lg px-4 py-2 text-left transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 text-[0.97rem]"
+          onClick={() => onSelect(q)}
+          type="button"
+        >
+          {q}
+        </button>
+      ))}
+    </div>
+  );
+})
 
 // Komponen utama dengan Suspense
 export function ChatForm({ className, ...props }: React.ComponentProps<"form">) {
@@ -52,13 +100,13 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     handleSubmit: handleChatSubmit,
     isLoading,
     stop,
+    error,
   } = useChat({
     api: "/api/chat",
   })
 
   const [messageSources, setMessageSources] = useState<Record<string, Source[]>>({})
   const [processedMessages, setProcessedMessages] = useState<typeof originalMessages>([])
-  const [newsData, setNewsData] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
@@ -109,19 +157,6 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
   }, [processedMessages, shouldAutoScroll])
 
   useEffect(() => {
-    // Fetch news metadata for source references
-    async function fetchNewsMetadata() {
-      try {
-        const response = await fetch("/api/news/metadata")
-        const data = await response.json()
-        if (data.metadata) {
-          setNewsData(data.metadata)
-        }
-      } catch (error) {
-        console.error("Failed to fetch news metadata:", error)
-      }
-    }
-
     // Fetch title data from API
     async function fetchTitleData() {
       try {
@@ -135,7 +170,6 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
       }
     }
 
-    fetchNewsMetadata()
     fetchTitleData()
   }, [])
 
@@ -162,21 +196,14 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
         // Extract article references and clean up the message
         const { cleanContent, articleRefs } = extractAndCleanMessage(message.content)
 
-        // Update sources if we found article references
-        if (articleRefs.length > 0 && newsData.length > 0) {
-          const uniqueRefs = [...new Set(articleRefs)]
-          const sources = uniqueRefs
-            .map((ref) => {
-              const index = Number.parseInt(ref) - 1
-              if (index >= 0 && index < newsData.length) {
-                return {
-                  title: newsData[index].title,
-                  url: newsData[index].url,
-                }
-              }
-              return null
-            })
-            .filter(Boolean) as Source[]
+        // Sumber = artikel yang benar-benar diretrieve server (annotation),
+        // disaring ke artikel yang dikutip model lewat kode "ARTIKEL X"
+        const retrieved = getRetrievedSources(message)
+        if (retrieved.length > 0 && articleRefs.length > 0) {
+          const cited = new Set(articleRefs.map((r) => Number.parseInt(r)))
+          const sources = retrieved
+            .filter((s) => cited.has(s.ref))
+            .map(({ title, url }) => ({ title, url }))
 
           if (sources.length > 0) {
             setMessageSources((prev) => ({
@@ -198,13 +225,14 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     setProcessedMessages(newProcessedMessages)
 
     // Notify parent window of height changes in embed mode
-    if (isEmbedMode && typeof window !== "undefined" && window.parent !== window) {
+    const parentOrigin = isEmbedMode ? getParentOrigin() : null
+    if (parentOrigin) {
       setTimeout(() => {
         const height = document.body.scrollHeight
-        window.parent.postMessage({ type: "resize", height }, "*")
+        window.parent.postMessage({ type: "resize", height }, parentOrigin)
       }, 100)
     }
-  }, [originalMessages, newsData, isEmbedMode])
+  }, [originalMessages, isEmbedMode])
 
   // Function to extract article references and clean up the message
   function extractAndCleanMessage(content: string): { cleanContent: string; articleRefs: string[] } {
@@ -227,7 +255,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     cleanContent = cleanContent.replace(trailingArticleRegex, "")
 
     // Remove any remaining "(ARTIKEL X)" references in the text
-    cleanContent = cleanContent.replace(/$$ARTIKEL\s+\d+$$/gi, "")
+    cleanContent = cleanContent.replace(/\s*\(ARTIKEL\s+\d+(?:\s*,?\s*ARTIKEL\s+\d+)*\)/gi, "")
 
     return { cleanContent, articleRefs }
   }
@@ -245,7 +273,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     }
   }
 
-  const handleExampleSelect = (question: string) => {
+  const handleExampleSelect = useCallback((question: string) => {
     setInput(question)
     setShowExamples(false)
     // Simulasikan submit otomatis
@@ -253,7 +281,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
       const form = document.getElementById('chat-form-main') as HTMLFormElement | null
       if (form) form.requestSubmit()
     }, 0)
-  }
+  }, [setInput])
 
   const welcomeHeader = (
     <header className="m-auto flex max-w-96 flex-col gap-5 text-center py-8">
@@ -313,6 +341,13 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
           )}
         </div>
       ))}
+      {error && !isLoading && (
+        <div className="self-start rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error.message?.includes("Terlalu banyak")
+            ? "Terlalu banyak pertanyaan. Silakan coba lagi sebentar lagi."
+            : "Maaf, terjadi kesalahan. Silakan coba lagi."}
+        </div>
+      )}
       {/* Loading animation - hanya muncul saat memproses, bukan saat mengetik */}
       {isProcessing && (
         <div className="self-start rounded-xl bg-gray-100 px-3 py-2 text-sm">
@@ -325,41 +360,6 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     </div>
   )
 
-  const ExampleQuestions = React.memo(({ questions, isLoading, onSelect }: { 
-    questions: string[], 
-    isLoading: boolean, 
-    onSelect: (q: string) => void 
-  }) => {
-    if (isLoading) {
-      return (
-        <div className="flex flex-col gap-2 mb-6">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 h-10 animate-pulse"
-            />
-          ))}
-        </div>
-      );
-    }
-
-    if (questions.length === 0) return null;
-
-    return (
-      <div className="flex flex-col gap-2 mb-6">
-        {questions.map((q, idx) => (
-          <button
-            key={`${q}-${idx}`}
-            className="border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-900 rounded-lg px-4 py-2 text-left transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 text-[0.97rem]"
-            onClick={() => onSelect(q)}
-            type="button"
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-    );
-  });
 
   return (
     <main
