@@ -102,8 +102,8 @@ export async function POST(req: Request) {
     Jawablah dalam Bahasa Indonesia yang baik dan benar.`,
         messages,
         // gpt-6-luna adalah model reasoning: temperature tidak didukung.
-        // Effort "none" mematikan reasoning: paling cepat untuk chat berbasis konteks.
-        providerOptions: { openai: { reasoningEffort: "none" } },
+        // Effort "low": reasoning tipis supaya jawaban lebih cermat tapi tetap cepat.
+        providerOptions: { openai: { reasoningEffort: "low" } },
       })
 
       result.mergeIntoDataStream(dataStream)
