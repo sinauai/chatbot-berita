@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, Suspense, useRef } from "react"
+import React, { useState, useEffect, Suspense, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { useChat } from "ai/react"
 import { ArrowUpIcon, Loader2 } from "lucide-react"
@@ -11,16 +11,28 @@ import Link from "next/link"
 import ReactMarkdown from "react-markdown"
 import { useEmbedMode } from "@/hooks/use-embed-mode"
 import { trackArticleClick } from "@/lib/track-click"
+import { getParentOrigin } from "@/lib/embed-origins"
 
 type Source = {
   title: string
   url: string
 }
 
+type RetrievedSource = Source & { ref: number }
+
+// Ambil daftar artikel hasil retrieval dari message annotation yang dikirim /api/chat
+function getRetrievedSources(message: { annotations?: unknown[] }): RetrievedSource[] {
+  for (const annotation of message.annotations ?? []) {
+    const a = annotation as { type?: string; sources?: RetrievedSource[] }
+    if (a?.type === "sources" && Array.isArray(a.sources)) return a.sources
+  }
+  return []
+}
+
 // Komponen loading fallback
 function ChatFormSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-[35rem] flex-col items-stretch h-svh max-h-svh bg-white rounded-lg shadow-md border border-gray-200">
+    <div className="mx-auto flex w-full max-w-[35rem] flex-col items-stretch h-svh max-h-svh bg-white text-black rounded-lg shadow-md border border-gray-200">
       <div className="flex-1 content-center overflow-y-auto px-6">
         <div className="m-auto flex max-w-96 flex-col gap-5 text-center">
           <div className="h-8 w-64 bg-gray-200 rounded-md mx-auto animate-pulse"></div>
@@ -31,6 +43,42 @@ function ChatFormSkeleton() {
     </div>
   )
 }
+
+const ExampleQuestions = React.memo(function ExampleQuestions({ questions, isLoading, onSelect }: { 
+  questions: string[], 
+  isLoading: boolean, 
+  onSelect: (q: string) => void 
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2 mb-6">
+        {[1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 h-10 animate-pulse"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (questions.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2 mb-6">
+      {questions.map((q, idx) => (
+        <button
+          key={`${q}-${idx}`}
+          className="font-sans border border-gray-200 border-l-4 border-l-kompas-gold bg-white hover:border-kompas-blue hover:text-kompas-blue text-black rounded-lg px-4 py-2 text-left transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-kompas-blue/40 text-[0.97rem]"
+          onClick={() => onSelect(q)}
+          type="button"
+        >
+          {q}
+        </button>
+      ))}
+    </div>
+  );
+})
 
 // Komponen utama dengan Suspense
 export function ChatForm({ className, ...props }: React.ComponentProps<"form">) {
@@ -52,20 +100,20 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     handleSubmit: handleChatSubmit,
     isLoading,
     stop,
+    error,
   } = useChat({
     api: "/api/chat",
   })
 
   const [messageSources, setMessageSources] = useState<Record<string, Source[]>>({})
   const [processedMessages, setProcessedMessages] = useState<typeof originalMessages>([])
-  const [newsData, setNewsData] = useState<any[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
   const [showExamples, setShowExamples] = useState(true)
   const [exampleQuestions, setExampleQuestions] = useState<string[]>([])
   const [questionsLoaded, setQuestionsLoaded] = useState(false)
-  const [titleData, setTitleData] = useState({ title: 'Halo, Sahabat Kompas', subtitle: 'Silakan ajukan pertanyaan terkait artikel yang Anda baca. Jawaban dibuat berdasarkan berita di Kompas.id.' })
+  const [titleData, setTitleData] = useState<{ keyword?: string; title: string; subtitle: string }>({ title: 'Halo, Sahabat Kompas', subtitle: 'Silakan ajukan pertanyaan terkait artikel yang Anda baca. Jawaban dibuat berdasarkan berita di Kompas.id.' })
 
   // Fetch example questions once on component mount
   useEffect(() => {
@@ -109,33 +157,19 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
   }, [processedMessages, shouldAutoScroll])
 
   useEffect(() => {
-    // Fetch news metadata for source references
-    async function fetchNewsMetadata() {
-      try {
-        const response = await fetch("/api/news/metadata")
-        const data = await response.json()
-        if (data.metadata) {
-          setNewsData(data.metadata)
-        }
-      } catch (error) {
-        console.error("Failed to fetch news metadata:", error)
-      }
-    }
-
     // Fetch title data from API
     async function fetchTitleData() {
       try {
         const response = await fetch("/api/title")
         const data = await response.json()
         if (data.title && data.subtitle) {
-          setTitleData({ title: data.title, subtitle: data.subtitle })
+          setTitleData({ keyword: data.keyword, title: data.title, subtitle: data.subtitle })
         }
       } catch (error) {
         console.error("Failed to fetch title data:", error)
       }
     }
 
-    fetchNewsMetadata()
     fetchTitleData()
   }, [])
 
@@ -162,21 +196,14 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
         // Extract article references and clean up the message
         const { cleanContent, articleRefs } = extractAndCleanMessage(message.content)
 
-        // Update sources if we found article references
-        if (articleRefs.length > 0 && newsData.length > 0) {
-          const uniqueRefs = [...new Set(articleRefs)]
-          const sources = uniqueRefs
-            .map((ref) => {
-              const index = Number.parseInt(ref) - 1
-              if (index >= 0 && index < newsData.length) {
-                return {
-                  title: newsData[index].title,
-                  url: newsData[index].url,
-                }
-              }
-              return null
-            })
-            .filter(Boolean) as Source[]
+        // Sumber = artikel yang benar-benar diretrieve server (annotation),
+        // disaring ke artikel yang dikutip model lewat kode "ARTIKEL X"
+        const retrieved = getRetrievedSources(message)
+        if (retrieved.length > 0 && articleRefs.length > 0) {
+          const cited = new Set(articleRefs.map((r) => Number.parseInt(r)))
+          const sources = retrieved
+            .filter((s) => cited.has(s.ref))
+            .map(({ title, url }) => ({ title, url }))
 
           if (sources.length > 0) {
             setMessageSources((prev) => ({
@@ -198,13 +225,14 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     setProcessedMessages(newProcessedMessages)
 
     // Notify parent window of height changes in embed mode
-    if (isEmbedMode && typeof window !== "undefined" && window.parent !== window) {
+    const parentOrigin = isEmbedMode ? getParentOrigin() : null
+    if (parentOrigin) {
       setTimeout(() => {
         const height = document.body.scrollHeight
-        window.parent.postMessage({ type: "resize", height }, "*")
+        window.parent.postMessage({ type: "resize", height }, parentOrigin)
       }, 100)
     }
-  }, [originalMessages, newsData, isEmbedMode])
+  }, [originalMessages, isEmbedMode])
 
   // Function to extract article references and clean up the message
   function extractAndCleanMessage(content: string): { cleanContent: string; articleRefs: string[] } {
@@ -227,7 +255,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     cleanContent = cleanContent.replace(trailingArticleRegex, "")
 
     // Remove any remaining "(ARTIKEL X)" references in the text
-    cleanContent = cleanContent.replace(/$$ARTIKEL\s+\d+$$/gi, "")
+    cleanContent = cleanContent.replace(/\s*\(ARTIKEL\s+\d+(?:\s*,?\s*ARTIKEL\s+\d+)*\)/gi, "")
 
     return { cleanContent, articleRefs }
   }
@@ -245,7 +273,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     }
   }
 
-  const handleExampleSelect = (question: string) => {
+  const handleExampleSelect = useCallback((question: string) => {
     setInput(question)
     setShowExamples(false)
     // Simulasikan submit otomatis
@@ -253,12 +281,15 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
       const form = document.getElementById('chat-form-main') as HTMLFormElement | null
       if (form) form.requestSubmit()
     }, 0)
-  }
+  }, [setInput])
 
   const welcomeHeader = (
     <header className="m-auto flex max-w-96 flex-col gap-5 text-center py-8">
-      <h1 className="text-2xl font-semibold leading-none tracking-tight">{titleData.title}</h1>
-      <p className="text-muted-foreground text-sm">
+      {titleData.keyword && (
+        <p className="font-sans text-sm font-bold uppercase tracking-wide text-kompas-red">{titleData.keyword}</p>
+      )}
+      <h1 className="font-serif text-2xl font-bold leading-tight">{titleData.title}</h1>
+      <p className="font-serif text-black/80 text-sm">
         {titleData.subtitle}
       </p>
     </header>
@@ -271,10 +302,10 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
         <div key={index} className="flex flex-col">
           <div
             data-role={message.role}
-            className="max-w-[80%] rounded-xl px-3 py-2 text-sm data-[role=assistant]:self-start data-[role=user]:self-end data-[role=assistant]:bg-gray-100 data-[role=user]:bg-blue-500 data-[role=assistant]:text-black data-[role=user]:text-white"
+            className="max-w-[80%] rounded-xl px-3 py-2 text-sm data-[role=assistant]:self-start data-[role=user]:self-end data-[role=assistant]:bg-gray-100 data-[role=user]:bg-kompas-blue data-[role=assistant]:text-black data-[role=user]:text-white"
           >
             {message.role === "assistant" ? (
-              <div className="prose prose-sm max-w-none [&>p]:mb-4 [&>ul]:space-y-2 [&>ol]:space-y-2">
+              <div className="prose prose-sm max-w-none font-serif text-inherit prose-p:text-inherit prose-li:text-inherit prose-strong:text-inherit prose-headings:font-serif prose-headings:text-inherit prose-a:text-kompas-blue [&>p]:mb-4 [&>ul]:space-y-2 [&>ol]:space-y-2">
                 <ReactMarkdown>
                   {message.content}
                 </ReactMarkdown>
@@ -285,8 +316,8 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
           </div>
           {/* Sources section */}
           {message.role === "assistant" && messageSources[message.id] && messageSources[message.id].length > 0 && (
-            <div className="mt-1 self-start text-xs text-gray-500">
-              <p className="font-medium mb-2">Sumber:</p>
+            <div className="mt-1 self-start font-sans text-xs text-gray-600">
+              <p className="font-bold uppercase tracking-wide text-kompas-red mb-2">Sumber</p>
               <ul className="mt-1 space-y-2 list-disc list-inside pl-2">
                 {messageSources[message.id].map((source, idx) => (
                   <li key={idx} className="leading-relaxed">
@@ -294,7 +325,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
                       href={source.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline hover:text-blue-800 transition-colors duration-200"
+                      className="text-kompas-blue hover:underline transition-colors duration-200"
                       onClick={() => {
                         // Track article click without affecting main functionality
                         trackArticleClick({
@@ -313,11 +344,18 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
           )}
         </div>
       ))}
+      {error && !isLoading && (
+        <div className="self-start rounded-xl bg-red-50 px-3 py-2 font-sans text-sm text-kompas-red">
+          {error.message?.includes("Terlalu banyak")
+            ? "Terlalu banyak pertanyaan. Silakan coba lagi sebentar lagi."
+            : "Maaf, terjadi kesalahan. Silakan coba lagi."}
+        </div>
+      )}
       {/* Loading animation - hanya muncul saat memproses, bukan saat mengetik */}
       {isProcessing && (
-        <div className="self-start rounded-xl bg-gray-100 px-3 py-2 text-sm">
+        <div className="self-start rounded-xl bg-gray-100 px-3 py-2 font-sans text-sm">
           <div className="flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin text-kompas-blue" />
             <span>Sedang menyusun jawaban...</span>
           </div>
         </div>
@@ -325,41 +363,6 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
     </div>
   )
 
-  const ExampleQuestions = React.memo(({ questions, isLoading, onSelect }: { 
-    questions: string[], 
-    isLoading: boolean, 
-    onSelect: (q: string) => void 
-  }) => {
-    if (isLoading) {
-      return (
-        <div className="flex flex-col gap-2 mb-6">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 h-10 animate-pulse"
-            />
-          ))}
-        </div>
-      );
-    }
-
-    if (questions.length === 0) return null;
-
-    return (
-      <div className="flex flex-col gap-2 mb-6">
-        {questions.map((q, idx) => (
-          <button
-            key={`${q}-${idx}`}
-            className="border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-900 rounded-lg px-4 py-2 text-left transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 text-[0.97rem]"
-            onClick={() => onSelect(q)}
-            type="button"
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-    );
-  });
 
   return (
     <main
@@ -385,7 +388,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
       <form
         id="chat-form-main"
         onSubmit={handleSubmit}
-        className="border-input bg-background focus-within:ring-ring/10 relative mb-6 flex items-start rounded-[16px] border text-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-0 w-full max-w-[90%] mx-auto"
+        className="font-sans border-input bg-background focus-within:ring-kompas-blue/20 relative mb-6 flex items-start rounded-[16px] border text-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-0 w-full max-w-[90%] mx-auto"
         style={{ minHeight: '56px' }}
       >
         <div className="flex-1 px-3 py-2">
@@ -404,7 +407,7 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
                 type="submit"
                 variant="ghost"
                 size="sm"
-                className="absolute bottom-1 right-1 size-6 rounded-full"
+                className="absolute bottom-1 right-1 size-6 rounded-full bg-kompas-blue text-white hover:bg-kompas-blue/90 hover:text-white disabled:bg-gray-300"
                 disabled={!input.trim() || isLoading}
               >
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUpIcon size={16} />}
@@ -416,13 +419,13 @@ function ChatFormContent({ className, ...props }: React.ComponentProps<"form">) 
       </form>
       {/* Footer - hide in embed mode if needed */}
       {!isEmbedMode && (
-        <footer className="border-t border-gray-200 py-3 text-center text-xs text-gray-500 w-full">
+        <footer className="border-t border-gray-200 py-3 text-center font-sans text-xs text-gray-600 w-full">
           Chatbot bisa salah, cek kembali dengan membaca laporan{" "}
           <Link
             href="https://www.kompas.id/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:underline"
+            className="font-bold text-kompas-blue hover:underline"
           >
             Kompas.id
           </Link>

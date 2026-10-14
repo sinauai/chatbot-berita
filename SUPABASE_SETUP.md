@@ -59,19 +59,26 @@ FROM article_clicks
 GROUP BY article_url, article_title, DATE_TRUNC('day', clicked_at)
 ORDER BY total_clicks DESC;
 
--- Enable Row Level Security (RLS) untuk keamanan
+-- Enable Row Level Security (RLS) untuk keamanan.
+-- Sengaja TIDAK ada policy untuk anon/authenticated: semua insert dilakukan
+-- server lewat service role key (yang otomatis melewati RLS), sehingga data
+-- klik tidak bisa dibaca atau ditulis langsung dari browser.
 ALTER TABLE article_clicks ENABLE ROW LEVEL SECURITY;
 
--- Buat policy untuk allow insert dari aplikasi
-CREATE POLICY "Allow insert article clicks" ON article_clicks
-  FOR INSERT WITH CHECK (true);
-
--- Buat policy untuk allow select (jika nanti butuh dashboard)
-CREATE POLICY "Allow select article clicks" ON article_clicks
-  FOR SELECT USING (true);
+-- View analytics hanya untuk service role
+REVOKE ALL ON article_click_stats FROM anon, authenticated;
 ```
 
-### 2.3 Verifikasi Tabel
+### 2.3 Sudah pernah menjalankan versi lama skrip ini?
+Versi lama membuat policy yang membuka tabel untuk publik. Jalankan ini untuk menutupnya:
+
+```sql
+DROP POLICY IF EXISTS "Allow insert article clicks" ON article_clicks;
+DROP POLICY IF EXISTS "Allow select article clicks" ON article_clicks;
+REVOKE ALL ON article_click_stats FROM anon, authenticated;
+```
+
+### 2.4 Verifikasi Tabel
 Setelah menjalankan skrip, verifikasi bahwa tabel berhasil dibuat:
 1. Klik menu "Table Editor" di sidebar
 2. Anda harus melihat tabel `article_clicks` dalam daftar
@@ -97,15 +104,13 @@ Anda akan melihat beberapa informasi penting:
 Buat file `.env.local` di root project Anda (jika belum ada) dan tambahkan:
 
 ```env
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+# Supabase Configuration (server-side saja)
+SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
 ```
 
 **Ganti**:
 - `your-project-id` dengan Project URL Anda
-- `your-anon-key-here` dengan anon/public key Anda
 - `your-service-role-key-here` dengan service role key Anda
 
 ## ✅ Langkah 5: Verifikasi Setup
@@ -128,9 +133,10 @@ DELETE FROM article_clicks WHERE session_id = 'test-session-123';
 ## 🔒 Keamanan
 
 - ✅ Row Level Security (RLS) sudah diaktifkan
-- ✅ Policy untuk insert dan select sudah dibuat
-- ✅ Hanya anon key yang di-expose ke frontend
-- ✅ Service role key disimpan di server-side saja
+- ✅ Tidak ada policy publik: browser tidak bisa membaca/menulis tabel langsung
+- ✅ Tidak ada key Supabase yang di-expose ke frontend
+- ✅ Service role key disimpan di server-side saja, insert lewat `/api/track-click`
+- ✅ Endpoint hanya menerima URL artikel yang ada di `news.json`, dengan rate limit per IP
 
 ## 📊 Bonus: Query Analytics
 

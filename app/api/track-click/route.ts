@@ -1,80 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase'
+import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import newsData from '@/news.json'
+
+// Hanya URL artikel yang memang ada di news.json yang boleh dicatat
+const allowedUrls = new Map(newsData.map((a) => [a.url, a.title]))
+
+const clip = (v: unknown, max: number) =>
+  typeof v === 'string' && v.length > 0 ? v.slice(0, max) : undefined
 
 // POST /api/track-click
 export async function POST(request: NextRequest) {
+  const supabase = getSupabaseAdmin()
+  // Tracking tidak dikonfigurasi: abaikan diam-diam
+  if (!supabase) return new NextResponse(null, { status: 204 })
+
+  const limited = rateLimit(`click:${getClientIp(request)}`, { limit: 30, windowMs: 60_000 })
+  if (!limited.ok) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   try {
     const body = await request.json()
-    const { article_url, article_title, session_id, referrer_message_id } = body
+    const article_url = clip(body?.article_url, 500)
 
-    // Validate required fields
-    if (!article_url) {
-      return NextResponse.json(
-        { error: 'article_url is required' },
-        { status: 400 }
-      )
+    if (!article_url || !allowedUrls.has(article_url)) {
+      return NextResponse.json({ error: 'Unknown article_url' }, { status: 400 })
     }
 
-    // Get additional metadata from request
-    const user_agent = request.headers.get('user-agent') || undefined
-
-    // Generate session ID if not provided
-    const final_session_id = session_id || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-    // Insert click data into Supabase
-    const { data, error } = await supabaseAdmin
-      .from('article_clicks')
-      .insert({
-        article_url,
-        article_title,
-        session_id: final_session_id,
-        user_agent,
-        referrer_message_id,
-        clicked_at: new Date().toISOString()
-      })
-      .select()
+    const { error } = await supabase.from('article_clicks').insert({
+      article_url,
+      article_title: allowedUrls.get(article_url),
+      session_id: clip(body?.session_id, 100),
+      user_agent: clip(request.headers.get('user-agent'), 500),
+      referrer_message_id: clip(body?.referrer_message_id, 100),
+      clicked_at: new Date().toISOString(),
+    })
 
     if (error) {
       console.error('Supabase error:', error)
-      return NextResponse.json(
-        { error: 'Failed to track click', details: error.message },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Failed to track click' }, { status: 500 })
     }
 
-    return NextResponse.json(
-      { 
-        success: true, 
-        message: 'Click tracked successfully',
-        session_id: final_session_id
-      },
-      { status: 200 }
-    )
-
+    return NextResponse.json({ success: true }, { status: 200 })
   } catch (error) {
     console.error('API error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-}
-
-// GET /api/track-click (optional - for testing)
-export async function GET() {
-  return NextResponse.json(
-    { 
-      message: 'Article click tracking API is running',
-      endpoints: {
-        POST: '/api/track-click - Track an article click',
-        body: {
-          article_url: 'string (required)',
-          article_title: 'string (optional)',
-          session_id: 'string (optional - will be generated if not provided)',
-          referrer_message_id: 'string (optional)'
-        }
-      }
-    },
-    { status: 200 }
-  )
 }

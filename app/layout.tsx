@@ -1,9 +1,12 @@
 import { cn } from "@/lib/utils"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Inter } from "next/font/google"
+import { Lora, PT_Sans } from "next/font/google"
 import type { ReactNode } from "react"
+import { allowedOrigins } from "@/lib/embed-origins"
 
-const inter = Inter({ subsets: ["latin"] })
+// Gaya visual Kompas: Lora untuk judul & teks, PT Sans untuk keyword & elemen UI
+const lora = Lora({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-lora" })
+const ptSans = PT_Sans({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-pt-sans" })
 
 export const metadata = {
   title: "Chatbot Berita Kompas.id",
@@ -15,35 +18,39 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="id">
       <head>
-        {/* Add script for cross-origin communication */}
+        {/* Komunikasi lintas origin: hanya dengan origin yang ada di allowlist */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              window.addEventListener('message', function(event) {
-                // Only accept messages from allowed origins
-                const allowedOrigins = ['*']; // Replace with specific origins in production
-                if (allowedOrigins.includes('*') || allowedOrigins.includes(event.origin)) {
-                  if (event.data.type === 'resize') {
-                    // Handle resize messages
-                    const height = event.data.height;
-                    if (height && !isNaN(height)) {
-                      document.body.style.height = height + 'px';
-                    }
+              (function () {
+                var allowed = ${JSON.stringify(allowedOrigins)};
+                function parentOrigin() {
+                  if (window.parent === window) return null;
+                  var o = '';
+                  if (window.location.ancestorOrigins && window.location.ancestorOrigins.length) {
+                    o = window.location.ancestorOrigins[0];
+                  } else if (document.referrer) {
+                    try { o = new URL(document.referrer).origin; } catch (e) {}
                   }
+                  return allowed.indexOf(o) !== -1 ? o : null;
                 }
-              });
-              
-              // Send ready message to parent
-              window.addEventListener('load', function() {
-                if (window.parent !== window) {
-                  window.parent.postMessage({ type: 'ready', from: 'kompas-chatbot' }, '*');
-                }
-              });
+                window.addEventListener('message', function (event) {
+                  if (allowed.indexOf(event.origin) === -1) return;
+                  if (event.data && event.data.type === 'resize') {
+                    var height = Number(event.data.height);
+                    if (height && !isNaN(height)) document.body.style.height = height + 'px';
+                  }
+                });
+                window.addEventListener('load', function () {
+                  var origin = parentOrigin();
+                  if (origin) window.parent.postMessage({ type: 'ready', from: 'kompas-chatbot' }, origin);
+                });
+              })();
             `,
           }}
         />
       </head>
-      <body className={cn("flex min-h-svh flex-col antialiased", inter.className)}>
+      <body className={cn("flex min-h-svh flex-col bg-white font-serif text-black antialiased", lora.variable, ptSans.variable)}>
         <TooltipProvider delayDuration={0}>{children}</TooltipProvider>
       </body>
     </html>

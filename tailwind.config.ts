@@ -10,7 +10,16 @@ const config: Config = {
   ],
   theme: {
   	extend: {
+  		fontFamily: {
+  			serif: ['var(--font-lora)', 'Georgia', 'serif'],
+  			sans: ['var(--font-pt-sans)', 'Arial', 'sans-serif']
+  		},
   		colors: {
+  			kompas: {
+  				blue: '#00599A',
+  				red: '#c92b2c',
+  				gold: '#F3C727'
+  			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			card: {
