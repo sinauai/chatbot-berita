@@ -79,7 +79,7 @@ export async function POST(req: Request) {
       })
 
       const result = streamText({
-        model: openai("gpt-4o-mini"),
+        model: openai("gpt-6-luna"),
         system: `Anda adalah asisten AI yang HANYA dapat menjawab pertanyaan berdasarkan berita di Kompas.id.
 
     ATURAN KETAT:
@@ -101,7 +101,9 @@ export async function POST(req: Request) {
 
     Jawablah dalam Bahasa Indonesia yang baik dan benar.`,
         messages,
-        temperature: 0.3,
+        // gpt-6-luna adalah model reasoning: temperature tidak didukung.
+        // Effort "low" menjaga jawaban tetap cepat untuk chat berbasis konteks.
+        providerOptions: { openai: { reasoningEffort: "low" } },
       })
 
       result.mergeIntoDataStream(dataStream)
