@@ -1,10 +1,12 @@
 import { cn } from "@/lib/utils"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Inter } from "next/font/google"
+import { Lora, PT_Sans } from "next/font/google"
 import type { ReactNode } from "react"
 import { allowedOrigins } from "@/lib/embed-origins"
 
-const inter = Inter({ subsets: ["latin"] })
+// Gaya visual Kompas: Lora untuk judul & teks, PT Sans untuk keyword & elemen UI
+const lora = Lora({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-lora" })
+const ptSans = PT_Sans({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-pt-sans" })
 
 export const metadata = {
   title: "Chatbot Berita Kompas.id",
@@ -48,7 +50,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           }}
         />
       </head>
-      <body className={cn("flex min-h-svh flex-col antialiased", inter.className)}>
+      <body className={cn("flex min-h-svh flex-col bg-white font-serif text-black antialiased", lora.variable, ptSans.variable)}>
         <TooltipProvider delayDuration={0}>{children}</TooltipProvider>
       </body>
     </html>
