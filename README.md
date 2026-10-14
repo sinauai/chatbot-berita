@@ -85,7 +85,14 @@ NEXT_PUBLIC_EMBED_ALLOWED_ORIGINS=https://www.kompas.id,https://kompas.id
 
 ### 🛡️ Pembatasan Penggunaan
 - `/api/chat` dibatasi 15 pertanyaan per menit per IP, maksimal 10 pesan riwayat yang diteruskan ke model, dan 2.000 karakter per pesan (atur di `app/api/chat/route.ts`).
-- Rate limiter berbasis memori (`lib/rate-limit.ts`) bersifat *best effort* karena tiap instance serverless punya memori sendiri. Untuk batas global, ganti dengan Upstash Redis / Vercel KV.
+- Rate limiter berbasis memori (`lib/rate-limit.ts`) bersifat *best effort* karena tiap instance serverless punya memori sendiri. Untuk batas global, pasang rule di Vercel Firewall (gratis di Hobby, 1 rule per project, 1 juta request yang lolos per bulan):
+  1. Dashboard Vercel → pilih project → **Firewall** → **Configure** → **+ New Rule**
+  2. Nama: `Rate limit chat`
+  3. If: **Request Path** · **Equals** · `/api/chat`, lalu tambah **Method** · **Equals** · `POST`
+  4. Then: **Rate Limit** → **Fixed Window**, Time Window `60s`, Request Limit `15`, key **IP**, action **Default (429)**
+  5. **Save Rule** → **Review Changes** → **Publish** (langsung aktif tanpa redeploy)
+
+  Counter Vercel dihitung per region, jadi ini global untuk satu region. Limiter in-memory tetap jadi lapisan kedua.
 - Sumber yang ditampilkan di bawah jawaban diambil dari artikel yang benar-benar diretrieve server, bukan hanya dari kode `ARTIKEL X` yang ditulis model.
 
 ### 🚀 Deploy ke Vercel
