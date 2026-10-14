@@ -101,7 +101,9 @@ export async function POST(req: Request) {
 
     Jawablah dalam Bahasa Indonesia yang baik dan benar.`,
         messages,
-        // gpt-6-luna adalah model reasoning: temperature tidak didukung.
+        // gpt-6-luna adalah model reasoning: hanya menerima temperature 1.
+        // AI SDK 4.x mengirim temperature 0 bila tidak diisi, jadi set eksplisit.
+        temperature: 1,
         // Effort "low": reasoning tipis supaya jawaban lebih cermat tapi tetap cepat.
         providerOptions: { openai: { reasoningEffort: "low" } },
       })
