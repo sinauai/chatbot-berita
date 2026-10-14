@@ -3,7 +3,7 @@
 import React, { useState, useEffect, Suspense, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { useChat } from "ai/react"
-import { ArrowUpIcon, Loader2 } from "lucide-react"
+import { ArrowRight, ArrowUpIcon, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip"
 import { AutoResizeTextarea } from "@/components/autoresize-textarea"
@@ -51,13 +51,15 @@ const ExampleQuestions = React.memo(function ExampleQuestions({ questions, isLoa
 }) {
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-2 mb-6">
-        {[1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-2 h-10 animate-pulse"
-          />
-        ))}
+      <div className="mb-6 font-sans">
+        <div className="mb-2 h-3 w-28 rounded bg-gray-200 animate-pulse" />
+        <div className="divide-y divide-gray-200 border-y border-gray-200">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="py-3">
+              <div className="h-4 w-3/4 rounded bg-gray-100 animate-pulse" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -65,18 +67,26 @@ const ExampleQuestions = React.memo(function ExampleQuestions({ questions, isLoa
   if (questions.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-2 mb-6">
-      {questions.map((q, idx) => (
-        <button
-          key={`${q}-${idx}`}
-          className="font-sans border border-gray-200 border-l-4 border-l-kompas-gold bg-white hover:border-kompas-blue hover:text-kompas-blue text-black rounded-lg px-4 py-2 text-left transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-kompas-blue/40 text-[0.97rem]"
-          onClick={() => onSelect(q)}
-          type="button"
-        >
-          {q}
-        </button>
-      ))}
-    </div>
+    <nav aria-label="Contoh pertanyaan" className="mb-6 font-sans">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-kompas-red">Coba tanyakan</p>
+      <ul className="divide-y divide-gray-200 border-y border-gray-200">
+        {questions.map((q, idx) => (
+          <li key={`${q}-${idx}`}>
+            <button
+              className="group flex w-full items-center justify-between gap-3 py-3 text-left text-[0.95rem] leading-snug text-black transition-colors hover:text-kompas-blue focus:outline-none focus-visible:text-kompas-blue focus-visible:underline"
+              onClick={() => onSelect(q)}
+              type="button"
+            >
+              <span>{q}</span>
+              <ArrowRight
+                aria-hidden="true"
+                className="h-4 w-4 shrink-0 text-kompas-blue transition-transform group-hover:translate-x-0.5"
+              />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 })
 
